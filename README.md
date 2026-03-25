@@ -42,7 +42,7 @@ Click the **⚙** icon to open the settings drawer above the pill:
 - Draggable from any part of the pill (except the interactive buttons). Dragging with the drawer open closes it.
 
 ### Intelligence
-- **Circuit Breaker** — Detects rapid looping (e.g., clicking 6+ times in 20s). If tripped, automatically pauses VegaClick and alerts the user `PAUSED (Loop Limit)`
+- **Circuit Breaker** — Auto-pauses clicking (max 6 clicks per 20s) if the agent gets trapped in a loop
 - **Typing Cooldown** — Pauses clicking while you're typing, resumes after the configured delay
 - **Scroll Cooldown** — Pauses auto-scroll while you're manually scrolling
 - **Post-Click Rescan** — After clicking, waits `Scan` ms, rescans the DOM, waits the remaining gap, then clicks again to catch chained dialogs
