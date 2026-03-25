@@ -5,7 +5,7 @@
     var typLeft = window.__vctyping ? Math.max(0, typDelay - (Date.now() - window.__vctyping)) : 0;
     var scrLeft = window.__vcscrolling ? Math.max(0, 15000 - (Date.now() - window.__vcscrolling)) : 0;
     var cd = Math.max(typLeft, scrLeft);
-    return JSON.stringify({s:'active', c:window.__vcc||0, m:window.__vcm||'', inv:window.__vcTargets?window.__vcTargets.length:0, ml:window.__vcMLStats||{}, cd:cd});
+    return JSON.stringify({s:'active', c:window.__vcc||0, m:window.__vcm||'', inv:window.__vcTargets?window.__vcTargets.length:0, cd:cd});
   }
 
   // ─── CLEANUP ───
@@ -27,52 +27,6 @@
   window.__vcClicked = {};  // Dedup map: hash -> timestamp
   window.__vcClickPause = false;  // Post-click cooldown flag
 
-  // ═══════════════════════════════════════════════════════════
-  // MACHINE LEARNING STATE
-  // Learns from successful/failed clicks, persists in localStorage
-  // ═══════════════════════════════════════════════════════════
-  try {
-    window.__vcML = JSON.parse(localStorage.getItem('__vcML') || '{}');
-  } catch(e) { window.__vcML = {}; }
-  // ML structure: { signature: { hits: N, misses: N, score: N, lastSeen: timestamp } }
-  window.__vcMLStats = { learned: Object.keys(window.__vcML).length, rewarded: 0, punished: 0, blocked: 0 };
-
-  // ─── ML: Extract element signature for learning ───
-  function getSignature(el, kw) {
-    var tag = el.tagName ? el.tagName.toLowerCase() : '?';
-    var cls = (el.className||'').toString().split(/\s+/).slice(0,3).sort().join(',');
-    var pTag = el.parentElement ? el.parentElement.tagName.toLowerCase() : '?';
-    var pCls = el.parentElement ? (el.parentElement.className||'').toString().split(/\s+/).slice(0,2).sort().join(',') : '';
-    return kw + '|' + tag + '|' + cls.slice(0,40) + '|' + pTag + '|' + pCls.slice(0,30);
-  }
-
-  // ─── ML: Record success (button disappeared after click) ───
-  function mlReward(sig) {
-    if(!window.__vcML[sig]) window.__vcML[sig] = {hits:0, misses:0, score:0, lastSeen:0};
-    window.__vcML[sig].hits++;
-    window.__vcML[sig].score = Math.min(window.__vcML[sig].score + 2, 20); // Cap at +20
-    window.__vcML[sig].lastSeen = Date.now();
-    window.__vcMLStats.rewarded++;
-    try { localStorage.setItem('__vcML', JSON.stringify(window.__vcML)); } catch(e){}
-  }
-
-  // ─── ML: Record failure (button still visible after click) ───
-  function mlPunish(sig) {
-    if(!window.__vcML[sig]) window.__vcML[sig] = {hits:0, misses:0, score:0, lastSeen:0};
-    window.__vcML[sig].misses++;
-    window.__vcML[sig].score = Math.max(window.__vcML[sig].score - 1, -10); // Floor at -10
-    window.__vcML[sig].lastSeen = Date.now();
-    window.__vcMLStats.punished++;
-    try { localStorage.setItem('__vcML', JSON.stringify(window.__vcML)); } catch(e){}
-  }
-
-  // ─── ML: Get priority adjustment for a signature ───
-  function mlBoost(sig) {
-    var data = window.__vcML[sig];
-    if(!data) return 0;
-    if(data.score <= -5) { window.__vcMLStats.blocked++; return -999; } // Auto-block bad patterns
-    return data.score; // Positive = boost, negative = demote
-  }
 
   // ─── TYPING DETECTION (5s cooldown) ───
   window.__vcKD = function(e){
@@ -154,14 +108,15 @@
           else if(title) raw = title;
           else if(val) raw = val;
 
-          if(!raw) {
+          if(!raw && !e.getAttribute('data-tooltip-id')) {
             // Enter shadow roots even if no text
             if(e.shadowRoot) walk(e.shadowRoot, depth+1);
             continue;
           }
 
           var t = raw.split(/\r?\n/)[0].trim().toLowerCase();
-          if(t.length > 60 || t.length < 2) {
+          var hasTooltip = !!e.getAttribute('data-tooltip-id');
+          if(!hasTooltip && (t.length > 60 || t.length < 2)) {
             if(e.shadowRoot) walk(e.shadowRoot, depth+1);
             continue;
           }
@@ -252,6 +207,22 @@
               if(cs2.cursor === 'pointer') isClickable = true;
             } catch(ex){}
           }
+          // Also check up to 3 parents — catches text nodes (STRONG/SPAN) inside buttons
+          if(!isClickable) {
+            var pp2 = e.parentElement;
+            for(var pi2=0; pi2<3 && pp2; pi2++) {
+              var pt2 = pp2.tagName ? pp2.tagName.toLowerCase() : '';
+              if(pt2 === 'button' || pt2 === 'a' || pp2.getAttribute('role') === 'button') {
+                isClickable = true; e = pp2; break;
+              }
+              try {
+                if(window.getComputedStyle(pp2).cursor === 'pointer') {
+                  isClickable = true; e = pp2; break;
+                }
+              } catch(ex){}
+              pp2 = pp2.parentElement;
+            }
+          }
           if(!isClickable) {
             if(e.shadowRoot) walk(e.shadowRoot, depth+1);
             continue;
@@ -282,8 +253,27 @@
             { kw='apply'; priority=50; }
           else if(t === 'relocate')
             { kw='relocate'; priority=45; }
-          else if(t.indexOf('review changes') === 0)
-            { kw='review changes'; priority=40; }
+
+          // Tooltip fallback: icon-only buttons (e.g. Changes Overview)
+          if(!kw) {
+            var tip = (e.getAttribute('data-tooltip-id')||'').toLowerCase();
+            if(tip === 'tooltip-changesoverview') {
+              // The panel is OPEN if the title ("0 Files With Changes") exists.
+              // Therefore we only click if the title DOES NOT exist (panel is closed).
+              // We also add a 3.5s cooldown to prevent double-clicking during the animation/mounting phase.
+              var titleEl = document.querySelector('[data-tooltip-id="toolbar-title-tooltip"]');
+              var titleExists = false;
+              if (titleEl) {
+                var txt = (titleEl.innerText || '').toLowerCase();
+                if (txt.indexOf('changes') >= 0) titleExists = true;
+              }
+              
+              var timeSinceClick = window.__vcOverviewAt ? (Date.now() - window.__vcOverviewAt) : 999999;
+              if(!titleExists && timeSinceClick > 3500) {
+                kw='changes overview'; priority=40;
+              }
+            }
+          }
 
           if(kw) {
             // Check if this keyword is toggled on in settings
@@ -377,13 +367,7 @@
       var lastClick = window.__vcClicked[hash];
       if(lastClick && Date.now() - lastClick < 5000) continue;
 
-      // ML: Adjust priority based on learned patterns
-      var sig = getSignature(e, t.kw);
-      var boost = mlBoost(sig);
-      if(boost <= -999) continue; // ML blocked this pattern
-      var adjPriority = t.priority + boost;
-
-      candidates.push({el:e, kw:t.kw, priority:adjPriority, rect:r, hash:hash, text:t.text, sig:sig});
+      candidates.push({el:e, kw:t.kw, priority:t.priority, rect:r, hash:hash, text:t.text});
     }
 
     // Sort by priority
@@ -419,7 +403,11 @@
         el.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,clientX:cx,clientY:cy}));
         el.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,clientX:cx,clientY:cy}));
         el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,clientX:cx,clientY:cy}));
-        if(typeof el.click==='function') setTimeout(function(){try{el.click();}catch(e){}}, 50);
+        // DANGEROUS FOR TOGGLES: Calling el.click() 50ms after the MouseEvent fires the click twice for React buttons.
+        // We skip it for "changes overview" entirely.
+        if(c.kw !== 'changes overview') {
+          if(typeof el.click==='function') setTimeout(function(){try{el.click();}catch(e){}}, 50);
+        }
       } catch(ex){
         try{el.click();}catch(e2){}
       }
@@ -443,45 +431,12 @@
       window.__vcc++;
       window.__vcm = 'Clicked ' + c.kw + ' (' + c.text.slice(0,15) + ')';
 
-      // ─── ML: Success/failure detection ───
-      // After 600ms, check if the element disappeared (success) or stayed (failure)
-      (function(el, sig, kw){
-        var wasRect = {l: el.getBoundingClientRect().left, t: el.getBoundingClientRect().top};
-        setTimeout(function(){
-          try {
-            // Check if element is still in DOM and visible
-            if(!el.isConnected) {
-              // Element removed from DOM = definite success
-              mlReward(sig);
-              return;
-            }
-            var newRect = el.getBoundingClientRect();
-            if(newRect.width === 0 || newRect.height === 0) {
-              // Element hidden = success
-              mlReward(sig);
-              return;
-            }
-            var cs = window.getComputedStyle(el);
-            if(cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') {
-              // Element hidden via CSS = success
-              mlReward(sig);
-              return;
-            }
-            // Element moved significantly = probably success (UI reshuffled)
-            if(Math.abs(newRect.left - wasRect.l) > 50 || Math.abs(newRect.top - wasRect.t) > 50) {
-              mlReward(sig);
-              return;
-            }
-            // Element still there and unchanged = failure/misclick
-            mlPunish(sig);
-          } catch(ex) {
-            // If we can't check, assume success (element might have been removed)
-            mlReward(sig);
-          }
-            // Clear click flag
-          try { delete el.dataset.vc16; } catch(e){}
-        }, 600);
-      })(el, c.sig, c.kw);
+      // 3.5s debounce to prevent double-clicks while animations/rendering finish
+      if(c.kw === 'changes overview') window.__vcOverviewAt = Date.now();
+      // Clear click flag after delay
+      (function(el){
+        setTimeout(function(){ try { delete el.dataset.vc16; } catch(e){} }, 600);
+      })(el);
 
       // Clear flag after 5s as fallback
       (function(el){setTimeout(function(){try{delete el.dataset.vc16;}catch(e){}}, 5000);})(el);

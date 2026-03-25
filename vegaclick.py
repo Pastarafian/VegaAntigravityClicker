@@ -36,7 +36,7 @@ KEYWORDS = [
     ('yes', 'Yes', '#64748b', 'Answer yes to a confirmation'),
     ('apply', 'Apply', '#64748b', 'Apply settings or changes'),
     ('relocate', 'Relocate', '#64748b', 'Relocate a file or resource'),
-    ('review changes', 'Review', '#a78bfa', 'Review pending code changes'),
+    ('changes overview', 'Overview', '#a78bfa', 'Open the Changes Overview panel'),
 ]
 
 PRESETS = {
@@ -45,20 +45,20 @@ PRESETS = {
         'accept all': True, 'allow': True, 'trust': True,
         'approve': False, 'continue': True, 'run': False,
         'retry': True, 'ok': False, 'yes': False,
-        'apply': False, 'relocate': False, 'review changes': True,
+        'apply': False, 'relocate': False, 'changes overview': True,
     },
     'Minimal': {
         'accept all': True, 'allow': True, 'trust': False,
         'approve': False, 'continue': False, 'run': False,
         'retry': False, 'ok': False, 'yes': False,
-        'apply': False, 'relocate': False, 'review changes': False,
+        'apply': False, 'relocate': False, 'changes overview': False,
     },
     'None': {kw: False for kw, _, _, _ in KEYWORDS},
 }
 
 PRESET_DESCS = {
     'All': 'All buttons enabled',
-    'Safe': 'Accept All, Allow, Trust, Continue, Retry, Review',
+    'Safe': 'Accept All, Allow, Trust, Continue, Retry, Overview',
     'Minimal': 'Accept All and Allow only',
     'None': 'All buttons disabled',
 }
@@ -668,6 +668,13 @@ class VegaClickApp:
             pass
 
     def open_preset_dropdown(self):
+        if self.preset_popup:
+            try:
+                if self.preset_popup.winfo_exists():
+                    self.close_preset_popup()
+                    return
+            except:
+                pass
         self.close_preset_popup()
         popup = tk.Toplevel(self.root)
         popup.overrideredirect(True)

@@ -20,7 +20,7 @@ It operates through a two-part architecture: a **Deep Scanner** (JavaScript inje
 ### Settings Drawer
 Click the **⚙** icon to open the settings drawer above the pill:
 
-- **Per-Keyword Toggles** — Enable or disable each button type individually (Accept All, Allow, Trust, Approve, Continue, Run, Retry, OK, Yes, Apply, Relocate, Review)
+- **Per-Keyword Toggles** — Enable or disable each button type individually (Accept All, Allow, Trust, Approve, Continue, Run, Retry, OK, Yes, Apply, Relocate, Changes Overview)
 - **Presets** — Dropdown with `All`, `Safe`, `Minimal`, and `None` configurations. Hover tooltips describe what each preset enables. Selection persists across sessions.
 - **Logs** — Opens a separate resizable log window showing timestamped click history (last 200 entries)
 - **Reset Clicks** — Resets the click counter to zero (also resets the browser-side counter)
@@ -42,7 +42,6 @@ Click the **⚙** icon to open the settings drawer above the pill:
 - Draggable from any part of the pill (except the interactive buttons). Dragging with the drawer open closes it.
 
 ### Intelligence
-- **Machine Learning** — Scores click patterns over time, auto-blocking elements that consistently cause bad outcomes
 - **Typing Cooldown** — Pauses clicking while you're typing, resumes after the configured delay
 - **Scroll Cooldown** — Pauses auto-scroll while you're manually scrolling
 - **Post-Click Rescan** — After clicking, waits `Scan` ms, rescans the DOM, waits the remaining gap, then clicks again to catch chained dialogs
@@ -120,7 +119,7 @@ All settings are saved to `settings.json` in the VegaClick directory:
 | Preset | Enabled Buttons |
 |---|---|
 | **All** | Everything |
-| **Safe** | Accept All, Allow, Trust, Continue, Retry, Review Changes |
+| **Safe** | Accept All, Allow, Trust, Continue, Retry, Changes Overview |
 | **Minimal** | Accept All, Allow |
 | **None** | Nothing |
 
