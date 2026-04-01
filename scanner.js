@@ -60,18 +60,28 @@
   function autoScroll() {
     // Hard pause from Python hotbar toggle
     if(window.__vcScrollPaused) return;
-    // Don't auto-scroll if user scrolled in last 15s
+    // Don't auto-scroll if user scrolled recently (default 15s cooldown)
     var sclDelay = window.__vcScrollDelay || 15000;
     if(Date.now() - window.__vcscrolling < sclDelay) return;
-    
-    // Specifically target chat output/logs, never code editors
-    var containers = document.querySelectorAll('.chat-container, .scrollable-element, .antigravity-panel, .thread-list, #conversation, [role="log"]');
-    for(var i=0; i<containers.length; i++){
-      var el = containers[i];
-      var cs = window.getComputedStyle(el);
-      if((cs.overflowY==='auto'||cs.overflowY==='scroll') && el.scrollHeight > el.clientHeight + 50){
+
+    // Behavioural approach: find scrollable containers inside the agent panel.
+    // The Antigravity DOM uses anonymous Tailwind divs with no stable id/class,
+    // so we walk all descendants of the panel and check overflow + geometry.
+    var panels = document.querySelectorAll('.antigravity-agent-side-panel');
+    for(var p=0; p<panels.length; p++){
+      var descendants = panels[p].querySelectorAll('*');
+      for(var i=0; i<descendants.length; i++){
+        var el = descendants[i];
+        // Must have meaningful scroll overflow (at least 80px hidden below)
+        if(el.scrollHeight <= el.clientHeight + 80) continue;
+        var cs = window.getComputedStyle(el);
+        if(cs.overflowY !== 'auto' && cs.overflowY !== 'scroll') continue;
+        // Must be a visible, sizeable container (not a tiny inner element)
+        var rect = el.getBoundingClientRect();
+        if(rect.width < 150 || rect.height < 150) continue;
+        // Only scroll if there's content below the viewport
         var distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-        if(distFromBottom > 150){
+        if(distFromBottom > 50){
           el.scrollTop = el.scrollHeight;
         }
       }
