@@ -33,21 +33,38 @@ Click the **⚙** icon to open the settings drawer above the pill:
   | Typing | 5 | s | Cooldown after user types before clicking resumes |
   | Scroll | 15 | s | Cooldown after user scrolls before auto-scroll resumes |
 
+- **Circuit Breaker Controls**:
+
+  | Control | Default | Description |
+  |---|---|---|
+  | Retry | 3 | Max retry clicks before auto-pausing the clicker |
+  | Timer | 20 | Time window (seconds) for counting retry clicks |
+
 ### Pill UI
-- **⏸ / ▶** — Orange pause icon when inactive, green play icon when active
-- **◎** — Overlay toggle: enables/disables the ripple effect on clicked buttons
-- **✕** — Close VegaClick
-- **Click counter** — Flashes on each click to confirm activity
-- **Status text** — Shows current state: `Inactive`, `Searching...`, or `Active (Np) Xt`
+| Button | Icon | Description |
+|---|---|---|
+| Settings | **⚙** | Open the settings drawer |
+| Play/Pause | **⏸ / ▶** | Orange pause icon when inactive, green play icon when active |
+| Scroll | **⇵** | Toggle auto-scroll on/off (red when paused) |
+| Overlay | **◎** | Toggle the ripple effect on clicked buttons |
+| Restart | **⟲** | Restart the clicker (reset all state, re-inject scanner) |
+| Close | **✕** | Close VegaClick |
+
+- **Click counter** — Shows total clicks, flashes on each click to confirm activity
+- **Status text** — Shows current state: `Inactive`, `Searching...`, or page states (`1A` active, `2W` waiting, `1C` complete)
+- **Tooltips** — Hover any button for a description
 - Draggable from any part of the pill (except the interactive buttons). Dragging with the drawer open closes it.
 
 ### Intelligence
-- **Circuit Breaker** — Auto-pauses clicking (max 6 clicks per 20s) if the agent gets trapped in a loop
+- **Circuit Breaker** — Auto-pauses clicking if the agent gets trapped in a retry loop (configurable max clicks + time window)
 - **Typing Cooldown** — Pauses clicking while you're typing, resumes after the configured delay
 - **Scroll Cooldown** — Pauses auto-scroll while you're manually scrolling
+- **Scroll Pause Toggle** — Completely disable auto-scroll from the hotbar without changing the cooldown timer
 - **Post-Click Rescan** — After clicking, waits `Scan` ms, rescans the DOM, waits the remaining gap, then clicks again to catch chained dialogs
 - **Danger Check** — Blocks dangerous commands (`rm -rf`, `del /s`, `format`, etc.) from being auto-clicked
 - **Stale Heartbeat Detection** — If the scanner stops responding for 8+ seconds, it re-injects automatically
+- **Process Liveness Guard** — If the hotbar UI crashes, a dead-mans switch natively forces the browser Javascript scanner to unbind itself to prevent a headless runaway clicker
+- **Live Antigravity Telemetry** — Extracts live quota/limit stats and current IDE activity status directly from the Antigravity background language server via CDP and proxy hooks
 
 ### Agentic Bridge
 A local HTTP API at `127.0.0.1:4242` allows external scripts to inject prompts into the IDE chat and read DOM state programmatically.
@@ -64,7 +81,7 @@ A local HTTP API at `127.0.0.1:4242` allows external scripts to inject prompts i
 ### Installation
 
 ```bash
-pip install websockets
+pip install websockets psutil
 ```
 
 ### Launch
@@ -107,11 +124,13 @@ All settings are saved to `settings.json` in the VegaClick directory:
   "click_delay": 150,
   "typing_delay": 5,
   "scroll_delay": 15,
+  "cb_clicks": 3,
+  "cb_seconds": 20,
   "preset": "Safe"
 }
 ```
 
-> **Note:** `active` (play/pause state) and `overlay` state are **not** persisted — VegaClick always starts paused with overlay enabled.
+> **Note:** `active` (play/pause state), `overlay`, and `scroll_paused` are **not** persisted — VegaClick always starts paused with overlay enabled and auto-scroll active.
 
 ---
 
