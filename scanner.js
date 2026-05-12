@@ -3,7 +3,8 @@
   if(window.__vc && (Date.now() - window.__vchb < 10000)) {
     var typDelay = window.__vcTypingDelay || 5000;
     var typLeft = window.__vctyping ? Math.max(0, typDelay - (Date.now() - window.__vctyping)) : 0;
-    var scrLeft = window.__vcscrolling ? Math.max(0, 15000 - (Date.now() - window.__vcscrolling)) : 0;
+    var sclDelay = window.__vcScrollDelay || 15000;
+    var scrLeft = window.__vcscrolling ? Math.max(0, sclDelay - (Date.now() - window.__vcscrolling)) : 0;
     var cd = Math.max(typLeft, scrLeft);
     var dotsActive = (Date.now() - (window.__vcDotsAt||0)) < 2000;
     return JSON.stringify({
@@ -92,7 +93,7 @@
   // Detects the animated ellipsis (. / .. / ...) in chat to determine if the agent is thinking
   function detectAgentDots() {
     try {
-      var panels = document.querySelectorAll('[class*="antigravity-agent-side-panel"], #conversation');
+      var panels = document.querySelectorAll('[class*="antigravity-agent-side-panel"], #conversation, [class*="agent-convo-background"], [class*="ide-chat-background"]');
       for(var p = 0; p < panels.length; p++) {
         var panel = panels[p];
 
@@ -195,10 +196,7 @@
     }
   }
 
-  // --- NATIVE EXTENSION API INTERCEPTION (CDP) ---
-  function parseModels() {
-      // Obsolete: Quota is now polled natively via Python loop intersecting language_server directly.
-  }
+
 
   function deepScan() {
     if(!window.__vc) return;
@@ -313,7 +311,7 @@
 
           // PARENT CHECK: skip if inside sidebar, action-card, settings panel
           var inSidebar = false;
-          var pp = e.parentElement;
+          var pp = e.parentElement || (e.parentNode && e.parentNode.host);
           for(var pi=0; pi<6 && pp; pi++){
             var pc = (pp.className||'').toString().toLowerCase();
             var pt = pp.tagName ? pp.tagName.toLowerCase() : '';
@@ -323,20 +321,24 @@
                pt === 'sidebar-footer' || pt === 'sidebar-header'){
               inSidebar = true; break;
             }
-            pp = pp.parentElement;
+            pp = pp.parentElement || (pp.parentNode && pp.parentNode.host);
           }
           if(inSidebar) continue;
 
           // CHAT PANEL CHECK: only click inside the agent chat panel
           var inChat = false;
-          var cp = e.parentElement;
+          var cp = e.parentElement || (e.parentNode && e.parentNode.host);
           for(var ci=0; ci<25 && cp; ci++){
             var ccls = (cp.className||'').toString().toLowerCase();
             var cid = (cp.id||'').toLowerCase();
-            if(ccls.indexOf('antigravity-agent-side-panel') >= 0 || cid === 'conversation') {
+            if(ccls.indexOf('antigravity-agent-side-panel') >= 0 ||
+               cid === 'conversation' ||
+               ccls.indexOf('agent-convo-background') >= 0 ||
+               ccls.indexOf('ide-chat-background') >= 0 ||
+               (cid === 'workbench.parts.auxiliarybar' && ccls.indexOf('right') >= 0)) {
               inChat = true; break;
             }
-            cp = cp.parentElement;
+            cp = cp.parentElement || (cp.parentNode && cp.parentNode.host);
           }
           if(!inChat) {
             if(e.shadowRoot) walk(e.shadowRoot, depth+1);
@@ -349,19 +351,22 @@
           }
 
           // ─── INTERACTIVITY CHECK: only match actual buttons ───
-          var isClickable = (tag === 'button' || tag === 'a' || e.getAttribute('role') === 'button');
+          var clsStr = (e.className || '').toString().toLowerCase();
+          var isClickable = (tag === 'button' || tag === 'a' || e.getAttribute('role') === 'button' || e.hasAttribute('tabindex') || clsStr.indexOf('btn') >= 0 || clsStr.indexOf('button') >= 0);
           if(!isClickable) {
             try {
               var cs2 = window.getComputedStyle(e);
               if(cs2.cursor === 'pointer') isClickable = true;
             } catch(ex){}
           }
+
           // Also check up to 3 parents — catches text nodes (STRONG/SPAN) inside buttons
           if(!isClickable) {
-            var pp2 = e.parentElement;
+            var pp2 = e.parentElement || (e.parentNode && e.parentNode.host);
             for(var pi2=0; pi2<3 && pp2; pi2++) {
               var pt2 = pp2.tagName ? pp2.tagName.toLowerCase() : '';
-              if(pt2 === 'button' || pt2 === 'a' || pp2.getAttribute('role') === 'button') {
+              var pcStr2 = (pp2.className || '').toString().toLowerCase();
+              if(pt2 === 'button' || pt2 === 'a' || pp2.getAttribute('role') === 'button' || pp2.hasAttribute('tabindex') || pcStr2.indexOf('btn') >= 0 || pcStr2.indexOf('button') >= 0) {
                 isClickable = true; e = pp2; break;
               }
               try {
@@ -369,7 +374,7 @@
                   isClickable = true; e = pp2; break;
                 }
               } catch(ex){}
-              pp2 = pp2.parentElement;
+              pp2 = pp2.parentElement || (pp2.parentNode && pp2.parentNode.host);
             }
           }
           if(!isClickable) {
@@ -381,13 +386,13 @@
           // Prevent clicking generic text links generated by markdown inside a chat message
           if(tag === 'a' && !cls.includes('btn') && !cls.includes('button')) {
              var isMarkdownLink = false;
-             var mParent = e.parentElement;
+             var mParent = e.parentElement || (e.parentNode && e.parentNode.host);
              for(var mp=0; mp<3 && mParent; mp++) {
                 var mTag = mParent.tagName ? mParent.tagName.toLowerCase() : '';
                 if(mTag === 'p' || mTag === 'li' || mTag === 'blockquote') {
                     isMarkdownLink = true; break;
                 }
-                mParent = mParent.parentElement;
+                mParent = mParent.parentElement || (mParent.parentNode && mParent.parentNode.host);
              }
              if(isMarkdownLink) {
                  if(e.shadowRoot) walk(e.shadowRoot, depth+1);
@@ -409,23 +414,27 @@
 
           if(t === 'accept all' || t.indexOf('accept all') === 0)
             { kw='accept all'; priority=100; }
-          else if(t === 'allow in this conversation' || t === 'allow this conversation')
+          else if(t === 'accept' || t.indexOf('accept ') === 0)
+            { kw='accept all'; priority=98; }
+          else if(t === 'allow in this conversation' || t === 'allow this conversation' || t === 'allow in workspace')
             { kw='allow'; priority=85; }
+          else if(t === 'allow' || t === 'allow all')
+            { kw='allow'; priority=84; }
           else if(t === 'trust' || t.indexOf('trust ') === 0)
             { kw='trust'; priority=85; }
           else if(t === 'approve' || t.indexOf('approve ') === 0)
             { kw='approve'; priority=80; }
-          else if(t === 'continue')
+          else if(t === 'continue' || t === 'proceed')
             { kw='continue'; priority=75; }
-          else if(t === 'run')
+          else if(t === 'run' || t === 'run command' || t === 'run task')
             { kw='run'; priority=70; }
-          else if(t === 'retry')
+          else if(t === 'retry' || t === 'try again')
             { kw='retry'; priority=65; }
-          else if(t === 'ok')
+          else if(t === 'ok' || t === 'okay')
             { kw='ok'; priority=60; }
-          else if(t === 'yes')
+          else if(t === 'yes' || t === 'confirm')
             { kw='yes'; priority=55; }
-          else if(t === 'apply')
+          else if(t === 'apply' || t === 'apply all')
             { kw='apply'; priority=50; }
           else if(t === 'relocate')
             { kw='relocate'; priority=45; }
@@ -478,10 +487,17 @@
       } catch(e){}
     }
 
-    walk(document, 0);
+    // Scope walk to known chat panel containers first, fall back to full document
+    var panels = document.querySelectorAll(
+      '.antigravity-agent-side-panel, #conversation, [class*="agent-convo-background"], [class*="ide-chat-background"]'
+    );
+    if(panels.length > 0) {
+      for(var pi=0; pi<panels.length; pi++) walk(panels[pi], 0);
+    } else {
+      walk(document, 0);
+    }
     window.__vcTargets = targets;
     drawHighlighters(targets);
-    parseModels();
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -540,7 +556,7 @@
             }
           } catch(ex){}
           if(danger) break;
-          p = p.parentElement;
+          p = p.parentElement || (p.parentNode && p.parentNode.host);
         }
         if(danger) continue;
       }

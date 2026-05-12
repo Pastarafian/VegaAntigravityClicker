@@ -1,5 +1,5 @@
 """
-VegaClick v16 — Deep Scanner + Fast Clicker Architecture
+VegaClick — Deep Scanner + Fast Clicker Architecture
 ==========================================================
 Two-part system:
  1. DEEP SCANNER — walks entire DOM tree, shadow roots, iframes, finds ALL clickable elements
@@ -19,12 +19,25 @@ import queue
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 
+VERSION = "v16"
 PORT = 9222
 POLL_INTERVAL = 0.8
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'settings.json')
 
+DEBUG_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug_logs', f"{time.strftime('%Y-%m-%d')}_vegaclick-debug")
+os.makedirs(DEBUG_LOG_DIR, exist_ok=True)
+DEBUG_LOG_FILE = os.path.join(DEBUG_LOG_DIR, 'debug.log')
 
+def debug_log(msg):
+    timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+    formatted = f"[{timestamp}] {msg}\n"
+    try:
+        with open(DEBUG_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(formatted)
+    except:
+        pass
 
 KEYWORDS = [
     ('accept all', 'Accept All', '#22c55e', 'Accept all pending code changes'),
@@ -150,6 +163,7 @@ class Toast:
 
 
 def load_settings():
+    debug_log("Loading settings from disk...")
     try:
         with open(SETTINGS_FILE, 'r') as f:
             data = json.load(f)
@@ -166,8 +180,11 @@ def load_settings():
             pill_y = data.get('pill_y', None)
             idle_alert_minutes = data.get('idle_alert_minutes', 5)
             auto_start = data.get('auto_start', False)
+            enabled_count = sum(1 for v in enabled.values() if v)
+            debug_log(f"Settings loaded: preset={preset} scan={scan_delay}ms click={click_delay}ms typing={typing_delay}s scroll={scroll_delay}s cb={cb_clicks}/{cb_seconds}s idle={idle_alert_minutes}min autostart={auto_start} enabled_kw={enabled_count}/{len(enabled)} pill=({pill_x},{pill_y})")
             return enabled, scan_delay, click_delay, preset, typing_delay, scroll_delay, cb_clicks, cb_seconds, pill_x, pill_y, idle_alert_minutes, auto_start
-    except:
+    except Exception as e:
+        debug_log(f"Settings load FAILED ({e}), using defaults")
         return {kw: True for kw, _, _, _ in KEYWORDS}, 100, 150, 'All', 5, 15, 3, 20, None, None, 5, False
 
 def save_settings(enabled, scan_delay=100, click_delay=150, preset='All', typing_delay=5, scroll_delay=15,
@@ -185,8 +202,9 @@ def save_settings(enabled, scan_delay=100, click_delay=150, preset='All', typing
             data['pill_y'] = pill_y
         with open(SETTINGS_FILE, 'w') as f:
             json.dump(data, f, indent=2)
-    except:
-        pass
+        debug_log(f"Settings saved: preset={preset} scan={scan_delay}ms click={click_delay}ms pill=({pill_x},{pill_y})")
+    except Exception as e:
+        debug_log(f"Settings save FAILED: {e}")
 
 command_queue = queue.Queue()
 
@@ -224,14 +242,18 @@ def start_agentic_bridge():
                 length = int(self.headers.get('Content-Length', 0))
                 data = json.loads(self.rfile.read(length).decode('utf-8')) if length > 0 else {}
                 if self.path == '/api/inject':
-                    command_queue.put({'action': 'inject', 'prompt': data.get('prompt', '')})
+                    prompt = data.get('prompt', '')
+                    debug_log(f"Bridge /api/inject received: {prompt[:80]}")
+                    command_queue.put({'action': 'inject', 'prompt': prompt})
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
                     self.wfile.write(b'{"status": "queued"}')
                 else:
+                    debug_log(f"Bridge 404: {self.path}")
                     self.send_response(404); self.end_headers()
-            except:
+            except Exception as e:
+                debug_log(f"Bridge POST error: {e}")
                 self.send_response(400); self.end_headers()
         def do_GET(self):
             if self.path == '/api/dom':
@@ -249,19 +271,21 @@ def start_agentic_bridge():
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
-                self.wfile.write(b'{"status": "ok", "version": "v16"}')
+                self.wfile.write(json.dumps({"status": "ok", "version": VERSION}).encode('utf-8'))
     try:
         class ReusableServer(HTTPServer):
             allow_reuse_address = True
+        debug_log("Agentic Bridge starting on 127.0.0.1:4242")
         ReusableServer(('127.0.0.1', 4242), Handler).serve_forever()
-    except:
-        pass
+    except Exception as e:
+        debug_log(f"Agentic Bridge FAILED to start: {e}")
 
 # ═══════════════════════════════════════════════════════════════
 # Process Cleanup
 # ═══════════════════════════════════════════════════════════════
 def cleanup_old_processes():
     """Kill all stale VegaClick/autoclicker processes before this instance starts."""
+    debug_log(f"cleanup_old_processes: starting (my_pid={os.getpid()})")
     my_pid = os.getpid()
     kill_patterns = ['ide-autoclicker', 'vegaclaw', 'vegaclick', 'autoclicker']
     killed_count = 0
@@ -276,10 +300,12 @@ def cleanup_old_processes():
                 if not cmdline: continue
                 cmd_lower = ' '.join(cmdline).lower()
                 if ('python' in cmd_lower or 'vegaclick' in cmd_lower) and any(kp in cmd_lower for kp in kill_patterns):
+                    debug_log(f"Killing stale process PID={p.info['pid']}")
                     p.kill()
                     killed_count += 1
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
+        debug_log(f"cleanup_old_processes: killed {killed_count} (psutil path)")
         if killed_count > 0:
             time.sleep(0.5)
         return killed_count
@@ -344,9 +370,8 @@ def cleanup_old_processes():
     return killed_count
 
 # ═══════════════════════════════════════════════════════════════
-# VegaClick v16 — DEEP SCANNER + FAST CLICKER JS
+# VegaClick — DEEP SCANNER + FAST CLICKER JS
 # ═══════════════════════════════════════════════════════════════
-import os
 _scanner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scanner.js')
 with open(_scanner_path, 'r', encoding='utf-8') as _f:
     FINDER_JS = _f.read()
@@ -375,7 +400,12 @@ async def _cdp_eval(ws_url, js_code):
         async with websockets.connect(ws_url, close_timeout=1) as ws:
             await ws.send(json.dumps({"id":1,"method":"Runtime.evaluate","params":{"expression":js_code,"returnByValue":True}}))
             return json.loads(await asyncio.wait_for(ws.recv(), timeout=2))
-    except: return None
+    except Exception as e:
+        # Only log actual connection failures, not routine timeouts
+        err_str = str(e)
+        if 'Connect call failed' in err_str or 'refused' in err_str:
+            debug_log(f"CDP connection failed: {err_str[:120]}")
+        return None
 
 # ═══════════════════════════════════════════════════════════════
 # UI Pill
@@ -383,8 +413,9 @@ async def _cdp_eval(ws_url, js_code):
 
 class VegaClickApp:
     def __init__(self):
+        debug_log("Initializing VegaClickApp...")
         self.root = tk.Tk()
-        self.root.title("VegaClick v16")
+        self.root.title(f"VegaClick {VERSION}")
         self.root.overrideredirect(True)
         self.root.attributes('-topmost', True)
         self.root.attributes('-alpha', 0.95)
@@ -400,6 +431,7 @@ class VegaClickApp:
         self.scan_targets = 0
         self.search_ticks = 0
         self.enabled, self.scan_delay, self.click_delay, self.preset, self.typing_delay, self.scroll_delay, self.cb_clicks, self.cb_seconds, self.pill_x, self.pill_y, self.idle_alert_minutes, self.auto_start = load_settings()
+        debug_log(f"UI pill geometry: 530x30 at ({self.pill_x},{self.pill_y}), screen=({self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()})")
         self.drawer = None
         self.toggle_labels = {}
         self.log_entries = []
@@ -411,6 +443,7 @@ class VegaClickApp:
         self._last_busy_time = time.time()  # Idle alert tracking
         self._idle_alerted = False           # Prevents repeated alerts
         self._active_toasts = []
+        self.telemetry = None
 
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
 
@@ -441,25 +474,8 @@ class VegaClickApp:
 
         self.ui_count = tk.Label(self.root, text="0 clicks", font=("Consolas", 9), fg='#64748b', bg='#0e1117', anchor='w')
         self.ui_count.pack(side='left', padx=(0,0), pady=4)
-        
-        # Quota labels — individual widgets, packed left after clicks
-        self._quota_colors = {'G': '#22c55e', 'F': '#3b82f6', 'C': '#f59e0b'}
-        self._pct_colors = {'high': '#22c55e', 'med': '#f59e0b', 'low': '#ef4444'}
-        self.quota_labels = {}
-        self.quota_tooltips = {}
-        for key in ['G', 'F', 'C']:
-            name_lbl = tk.Label(self.root, text=key, font=('Consolas', 8, 'bold'),
-                                fg=self._quota_colors[key], bg='#0e1117', anchor='w')
-            name_lbl.pack(side='left', padx=(6, 0), pady=4)
-            pct_lbl = tk.Label(self.root, text='', font=('Consolas', 8, 'bold'),
-                               fg='#64748b', bg='#0e1117', anchor='w')
-            pct_lbl.pack(side='left', padx=(1, 0), pady=4)
-            tt = Tooltip(name_lbl, f'{key}: Loading...')
-            self.quota_labels[key] = (name_lbl, pct_lbl)
-            self.quota_tooltips[key] = tt
-            pct_lbl.bind('<Enter>', lambda e, t=tt: t.show(e))
-            pct_lbl.bind('<Leave>', lambda e, t=tt: t.hide(e))
 
+        # Pack right-side buttons BEFORE quota labels so they always reserve their space
         close_btn = tk.Label(self.root, text="\u2715", font=("Segoe UI", 10), bg='#1c2128', fg='#64748b',
                              width=2, anchor='center', bd=0, relief='flat', padx=4, pady=2)
         close_btn.pack(side='right', padx=(2, 8), pady=4)
@@ -491,7 +507,7 @@ class VegaClickApp:
                                     width=2, anchor='center', bd=0, relief='flat', padx=4, pady=2)
         self.scroll_btn.pack(side='right', padx=2, pady=4)
         self.scroll_btn.bind('<Button-1>', lambda e: self.toggle_scroll())
-        Tooltip(self.scroll_btn, 'Toggle auto-scroll')
+        self.scroll_tt = Tooltip(self.scroll_btn, 'Auto-scroll: Active')
 
         self.play_btn = tk.Label(self.root, text='\u23f8', font=("Segoe UI", 10), bg='#1c2128', fg='#f59e0b',
                                  width=2, anchor='center', bd=0, relief='flat', padx=4, pady=2)
@@ -499,18 +515,40 @@ class VegaClickApp:
         self.play_btn.bind('<Button-1>', lambda e: self.toggle_play())
         Tooltip(self.play_btn, 'Pause / resume clicker (Ctrl+Shift+/)')
 
+        # Quota labels — packed left AFTER right buttons are reserved
+        self._quota_colors = {'G': '#22c55e', 'F': '#3b82f6', 'C': '#f59e0b'}
+        self._pct_colors = {'high': '#22c55e', 'med': '#f59e0b', 'low': '#ef4444'}
+        self.quota_labels = {}
+        self.quota_tooltips = {}
+        for key in ['G', 'F', 'C']:
+            name_lbl = tk.Label(self.root, text=key, font=('Consolas', 8, 'bold'),
+                                fg=self._quota_colors[key], bg='#0e1117', anchor='w')
+            name_lbl.pack(side='left', padx=(6, 0), pady=4)
+            pct_lbl = tk.Label(self.root, text='', font=('Consolas', 8, 'bold'),
+                               fg='#64748b', bg='#0e1117', anchor='w')
+            pct_lbl.pack(side='left', padx=(1, 0), pady=4)
+            tt = Tooltip(name_lbl, f'{key}: Loading...')
+            self.quota_labels[key] = (name_lbl, pct_lbl)
+            self.quota_tooltips[key] = tt
+            pct_lbl.bind('<Enter>', lambda e, t=tt: t.show(e))
+            pct_lbl.bind('<Leave>', lambda e, t=tt: t.hide(e))
+
         self.root.bind('<Button-1>', self._start_drag)
         self.root.bind('<B1-Motion>', self._on_drag)
         self.root.bind('<ButtonRelease-1>', self._end_drag)
 
         self.thread = threading.Thread(target=self.worker_loop, daemon=True)
         self.thread.start()
+        debug_log("Worker thread started")
         
         self.quota_thread = threading.Thread(target=self._fetch_quota_worker, daemon=True)
         self.quota_thread.start()
+        debug_log("Quota thread started")
         
         self._register_global_hotkey()
+        debug_log("Global hotkey registered")
         self.refresh_ui()
+        debug_log("Init complete — UI refresh loop started")
 
     def _fetch_quota_worker(self):
         import psutil, re, subprocess, ssl
@@ -581,7 +619,7 @@ class VegaClickApp:
                                     countdown = ''
                                     if rst and 'T' in rst:
                                         try:
-                                            from datetime import datetime, timezone
+                                            # datetime imported at module level
                                             reset_dt = datetime.fromisoformat(rst.replace('Z', '+00:00'))
                                             now = datetime.now(timezone.utc)
                                             delta = reset_dt - now
@@ -629,15 +667,16 @@ class VegaClickApp:
             time.sleep(2.0)
 
     def _start_drag(self, e):
-        if e.widget in (self.settings_btn, self.play_btn, self.overlay_btn, self.restart_btn, self.scroll_btn):
+        if e.widget in (self.settings_btn, self.play_btn, self.overlay_btn, self.highlight_btn, self.restart_btn, self.scroll_btn):
             return
-        self._dx, self._dy = e.x, e.y
+        self._dx, self._dy = e.x_root, e.y_root
+        self._orig_x, self._orig_y = self.root.winfo_x(), self.root.winfo_y()
         self.close_drawer()
     def _on_drag(self, e):
-        if e.widget in (self.settings_btn, self.play_btn, self.overlay_btn, self.restart_btn, self.scroll_btn):
+        if e.widget in (self.settings_btn, self.play_btn, self.overlay_btn, self.highlight_btn, self.restart_btn, self.scroll_btn):
             return
-        nx = self.root.winfo_x() + (e.x - self._dx)
-        ny = self.root.winfo_y() + (e.y - self._dy)
+        nx = self._orig_x + (e.x_root - self._dx)
+        ny = self._orig_y + (e.y_root - self._dy)
         self.root.geometry(f"{'+' if nx >= 0 else ''}{nx}{'+' if ny >= 0 else ''}{ny}")
 
     def _end_drag(self, e):
@@ -645,21 +684,25 @@ class VegaClickApp:
         new_x = self.root.winfo_x()
         new_y = self.root.winfo_y()
         if new_x != self.pill_x or new_y != self.pill_y:
+            debug_log(f"Pill dragged: ({self.pill_x},{self.pill_y}) -> ({new_x},{new_y})")
             self.pill_x = new_x
             self.pill_y = new_y
             self._save_all()
 
     def on_close(self):
+        debug_log("Closing VegaClickApp")
         self.close_drawer()
         self.root.withdraw()
         self.active = False
         def _force_exit():
             import os
+            debug_log("Forcing OS exit")
             self.root.destroy()
             os._exit(0)
         self.root.after(1200, _force_exit)
 
     def prompt_restart(self):
+        debug_log("Prompting user to restart Antigravity")
         import tkinter.messagebox as mb
         self.active = False
         self.play_btn.configure(bg='#1c2128')
@@ -674,6 +717,7 @@ class VegaClickApp:
 
     def restart_clicker(self):
         """Reset all clicker state and force re-injection of the scanner JS on next poll cycle."""
+        debug_log("restart_clicker: resetting all state")
         # Clear JS-side state on all connected pages so scanner re-injects fresh
         self._pending_clicker_reset = True
 
@@ -707,6 +751,7 @@ class VegaClickApp:
             self.active = True
             self.play_btn.configure(bg='#2d333b', text='\u25b6', fg='#22c55e', font=('Segoe UI', 10))
 
+        debug_log("restart_clicker: complete, active=True")
         self.add_log("Clicker restarted")
 
     def show_toast(self, text, color='#a78bfa', on_click=None):
@@ -844,21 +889,27 @@ class VegaClickApp:
 
     def toggle_overlay(self):
         self.overlay_on = not self.overlay_on
+        debug_log(f"toggle_overlay: overlay_on={self.overlay_on}")
         self.overlay_btn.configure(bg='#2d333b' if self.overlay_on else '#1c2128', fg='#a78bfa' if self.overlay_on else '#64748b')
 
     def toggle_highlight(self):
         self.highlight_on = not self.highlight_on
+        debug_log(f"toggle_highlight: highlight_on={self.highlight_on}")
         self.highlight_btn.configure(bg='#2d333b' if self.highlight_on else '#1c2128', fg='#00d4ff' if self.highlight_on else '#64748b')
 
     def toggle_scroll(self):
+        debug_log(f"toggle_scroll: from {self.scroll_paused} to {not self.scroll_paused}")
         self.scroll_paused = not self.scroll_paused
         if not self.scroll_paused:
             self.scroll_btn.configure(bg='#2d333b', fg='#00d4ff')
+            if hasattr(self, 'scroll_tt'): self.scroll_tt.text = 'Auto-scroll: Active'
         else:
             self.scroll_btn.configure(bg='#1c2128', fg='#64748b')
+            if hasattr(self, 'scroll_tt'): self.scroll_tt.text = 'Auto-scroll: Paused'
 
     def toggle_play(self):
         self.active = not getattr(self, 'active', True)
+        debug_log(f"toggle_play: active set to {self.active}")
         if self.active:
             self.play_btn.configure(bg='#2d333b', text='\u25b6', fg='#22c55e', font=('Segoe UI', 10))
             # Reset idle tracking when resuming
@@ -871,6 +922,7 @@ class VegaClickApp:
 
     def _save_all(self):
         """Convenience: save all current settings to disk."""
+        debug_log(f"_save_all: preset={self.preset} scan={self.scan_delay} click={self.click_delay} typing={self.typing_delay} scroll={self.scroll_delay} cb={self.cb_clicks}/{self.cb_seconds} idle={self.idle_alert_minutes}min")
         save_settings(
             self.enabled, self.scan_delay, self.click_delay, self.preset,
             self.typing_delay, self.scroll_delay, self.cb_clicks, self.cb_seconds,
@@ -910,6 +962,7 @@ class VegaClickApp:
 
     def _play_idle_alert(self):
         """Play a system sound to signal agent idle. Non-blocking."""
+        debug_log(f"Idle alert triggered after {self.idle_alert_minutes}min of inactivity")
         def _beep():
             try:
                 if sys.platform == 'win32':
@@ -926,6 +979,7 @@ class VegaClickApp:
     def toggle_auto_start(self):
         """Toggle whether VegaClick launches on system startup."""
         self.auto_start = not self.auto_start
+        debug_log(f"toggle_auto_start: auto_start={self.auto_start}")
         try:
             if sys.platform == 'win32':
                 import winreg
@@ -1149,6 +1203,7 @@ class VegaClickApp:
 
         self.typing_entry.bind('<KeyRelease>', lambda e: self._save_delays())
         self.scroll_entry.bind('<KeyRelease>', lambda e: self._save_delays())
+        self.scan_entry.bind('<KeyRelease>', lambda e: self._save_delays())
         self.click_entry.bind('<KeyRelease>', lambda e: self._save_delays())
         self.cb_clicks_entry.bind('<KeyRelease>', lambda e: self._save_delays())
         self.cb_secs_entry.bind('<KeyRelease>', lambda e: self._save_delays())
@@ -1240,6 +1295,7 @@ class VegaClickApp:
 
     def click_toggle(self, kw):
         self.enabled[kw] = not self.enabled.get(kw, True)
+        debug_log(f"click_toggle: {kw} -> {self.enabled[kw]}")
         self._save_all()
         if kw in self.toggle_labels:
             lbl, color = self.toggle_labels[kw]
@@ -1363,6 +1419,7 @@ class VegaClickApp:
         self.preset_popup = None
 
     def apply_preset(self, name):
+        debug_log(f"apply_preset: {self.preset} -> {name}")
         self.preset = name
         preset_toggles = PRESETS[name]
         for kw in self.enabled:
@@ -1377,6 +1434,10 @@ class VegaClickApp:
         self.close_preset_popup()
 
     def refresh_ui(self):
+        try:
+            self.root.attributes('-topmost', True)
+        except:
+            pass
         self.ui_status.configure(state='normal')
         self.ui_status.delete('1.0', 'end')
         
@@ -1442,14 +1503,17 @@ class VegaClickApp:
     # Telemetry is now automatically extracted via CDP in JS and populated into self.telemetry.
 
     def worker_loop(self):
+        debug_log("Worker loop starting")
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         threading.Thread(target=start_agentic_bridge, daemon=True).start()
+        debug_log("Agentic bridge thread spawned")
         # Telemetry is now natively provided by CDP via the FINDER_JS responses
 
         while True:
             try:
                 targets = loop.run_until_complete(get_targets_async())
+                debug_log(f"Poll: {len(targets)} total CDP targets found")
                 
                 # WHITELIST: Inject into Antigravity main pages AND the isolated 'antigravity-panel' Webview iframes
                 pages = [t for t in targets 
@@ -1457,13 +1521,20 @@ class VegaClickApp:
                          and t.get('webSocketDebuggerUrl')
                          and ('Antigravity' in t.get('title', '') or 'antigravity-panel' in t.get('url', ''))]
                 self.pages_connected = len(pages)
+                
+                if not getattr(self, '_last_pages_logged', None) == self.pages_connected:
+                    debug_log(f"Valid CDP Pages Found: {self.pages_connected}")
+                    self._last_pages_logged = self.pages_connected
 
                 if not pages:
                     if self.active:
                         self.status_text = "Searching..."
                         self.status_color = "#f59e0b"
                         self.search_ticks += 1
+                        if self.search_ticks % 5 == 0:
+                            debug_log(f"No valid pages found — search_ticks={self.search_ticks}")
                         if self.search_ticks == 25:
+                            debug_log("search_ticks hit 25 — prompting restart")
                             self.root.after(0, self.prompt_restart)
                     else:
                         self.status_text = "Inactive"
@@ -1482,47 +1553,38 @@ class VegaClickApp:
                                 # Force-clear stale heartbeat so new code always injects
                                 # Handle clicker restart: nuke all JS state to force fresh injection
                                 if getattr(self, '_pending_clicker_reset', False):
+                                    debug_log(f"Sending clicker reset JS to page: {p.get('title', '?')[:40]}")
                                     loop.run_until_complete(_cdp_eval(ws, "window.__vc=false;window.__vcc=0;window.__vcm='';window.__vcClicked={};window.__vcClickLog=[];window.__vcTargets=[];window.__vcAllMatched=0;window.__vcDotsAt=0;if(window.__vcObs)try{window.__vcObs.disconnect()}catch(e){};if(window.__vcDotsObs)try{window.__vcDotsObs.disconnect()}catch(e){};if(window.__vcInt)clearInterval(window.__vcInt);if(window.__vcScanInt)clearInterval(window.__vcScanInt)"))
                                     self._pending_clicker_reset = False
 
-                                # Send python heartbeat
-                                loop.run_until_complete(_cdp_eval(ws, "window.__vchb=Date.now()"))
-
-                                if getattr(self, '_pending_reset', False):
-                                    loop.run_until_complete(_cdp_eval(ws, "window.__vcc=0"))
-                                    self._pending_reset = False
-                                    
-                                # DIAGNOSTIC DUMP:
-                                if not getattr(self, '_did_dump', False):
-                                    self._did_dump = True
-                                    try:
-                                        dump_code = '''
-                                        (function() {
-                                            var ls = JSON.stringify(localStorage);
-                                            var ks = Object.keys(window).filter(k => k.includes('state') || k.includes('data') || k.includes('vc') || k.includes('__')).join(', ');
-                                            return ls + " ||| " + ks;
-                                        })()
-                                        '''
-                                        res = loop.run_until_complete(_cdp_eval(ws, dump_code))
-                                        with open('c:/tmp/vega_dump.txt', 'w', encoding='utf-8') as f:
-                                            f.write(str(res))
-                                    except Exception as e:
-                                        pass
-                                ov_js = f"window.__vcoverlay={'true' if self.overlay_on else 'false'};window.__vcHighlightOn={'true' if self.highlight_on else 'false'};"
-                                loop.run_until_complete(_cdp_eval(ws, ov_js))
-
-                                en_js = f"window.__vcEnabled={json.dumps(self.enabled)}"
-                                loop.run_until_complete(_cdp_eval(ws, en_js))
-
+                                # Batch all preamble state into a single CDP eval to reduce round trips (was 4 calls, now 1)
                                 scroll_paused_js = 'true' if self.scroll_paused else 'false'
-                                delay_js = f"window.__vcScanDelay={self.scan_delay};window.__vcClickDelay={self.click_delay};window.__vcTypingDelay={self.typing_delay * 1000};window.__vcScrollDelay={self.scroll_delay * 1000};window.__vcCBClicks={self.cb_clicks};window.__vcCBSeconds={self.cb_seconds * 1000};window.__vcScrollPaused={scroll_paused_js}"
-                                loop.run_until_complete(_cdp_eval(ws, delay_js))
+                                reset_js = 'window.__vcc=0;' if getattr(self, '_pending_reset', False) else ''
+                                if reset_js:
+                                    self._pending_reset = False
+                                preamble = (
+                                    f"window.__vchb=Date.now();"
+                                    f"{reset_js}"
+                                    f"window.__vcoverlay={'true' if self.overlay_on else 'false'};"
+                                    f"window.__vcHighlightOn={'true' if self.highlight_on else 'false'};"
+                                    f"window.__vcEnabled={json.dumps(self.enabled)};"
+                                    f"window.__vcScanDelay={self.scan_delay};"
+                                    f"window.__vcClickDelay={self.click_delay};"
+                                    f"window.__vcTypingDelay={self.typing_delay * 1000};"
+                                    f"window.__vcScrollDelay={self.scroll_delay * 1000};"
+                                    f"window.__vcCBClicks={self.cb_clicks};"
+                                    f"window.__vcCBSeconds={self.cb_seconds * 1000};"
+                                    f"window.__vcScrollPaused={scroll_paused_js}"
+                                )
+                                loop.run_until_complete(_cdp_eval(ws, preamble))
 
                                 res = loop.run_until_complete(_cdp_eval(ws, FINDER_JS))
                                 if res:
                                     val = res.get('result',{}).get('result',{}).get('value','{}')
                                     try: status = json.loads(val)
-                                    except: status = {}
+                                    except Exception as parse_err:
+                                        debug_log(f"FINDER_JS parse error: {parse_err}, raw={val[:200]}")
+                                        status = {}
                                     if isinstance(status, dict):
                                         c = status.get('c', 0)
                                         m = status.get('m', '')
@@ -1537,10 +1599,12 @@ class VegaClickApp:
                                         if c > 0: self.total_clicks = max(self.total_clicks, c)
                                         if m and m != self.last_msg:
                                             self.last_msg = m
+                                            debug_log(f"Scanner message: {m}")
                                             # Clear message in JS so it's not re-consumed on next poll
                                             loop.run_until_complete(_cdp_eval(ws, "window.__vcm=''"))
                                             print(f"[CLICK] {m}")
                                             if "[CIRCUIT BREAKER]" in m and getattr(self, 'active', False):
+                                                debug_log(f"CIRCUIT BREAKER triggered: {m}")
                                                 self.root.after(0, self.toggle_play)
                                                 self.status_text = "PAUSED (Loop Limit)"
                                                 self.status_color = "#ef4444"
@@ -1549,6 +1613,9 @@ class VegaClickApp:
 
 
                                         self.scan_targets = inv
+                                        # Log per-page state for deep debugging
+                                        page_state = 'Active(dots)' if dots else f'Waiting({all_matched}matches)' if all_matched > 0 else 'Idle'
+                                        debug_log(f"Page '{p.get('title','?')[:30]}': state={page_state} clicks={c} inv={inv} cd={cd}ms")
                                         # Classify page state
                                         if dots:
                                             a_count += 1
@@ -1556,7 +1623,8 @@ class VegaClickApp:
                                             w_count += 1
                                         else:
                                             c_count += 1
-                            except: pass
+                            except Exception as page_err:
+                                debug_log(f"Page processing error: {page_err}")
 
                             while not command_queue.empty():
                                 try:
@@ -1572,7 +1640,10 @@ class VegaClickApp:
                         self.cooldown = max_cd
                         # Store page states for colored rendering
                         self._pages_total = len(pages)
+                        old_states = getattr(self, '_page_states', (0,0,0))
                         self._page_states = (a_count, w_count, c_count)
+                        if old_states != self._page_states:
+                            debug_log(f"State change: A={a_count} W={w_count} I={c_count} (was A={old_states[0]} W={old_states[1]} I={old_states[2]}) cooldown={max_cd}ms total_clicks={self.total_clicks}")
 
                         # Idle alert: if any page is busy (active or waiting), reset timer
                         if a_count > 0 or w_count > 0:
@@ -1582,6 +1653,7 @@ class VegaClickApp:
                             idle_seconds = time.time() - self._last_busy_time
                             if idle_seconds >= self.idle_alert_minutes * 60:
                                 self._idle_alerted = True
+                                debug_log(f"Idle alert firing after {idle_seconds:.0f}s")
                                 self.root.after(0, self._play_idle_alert)
                                 self.root.after(0, lambda: self.add_log(f'Idle alert — agent idle for {self.idle_alert_minutes}min'))
                         self.status_text = 'states'  # Signal to refresh_ui to use _page_states
@@ -1597,7 +1669,7 @@ class VegaClickApp:
                                 loop.run_until_complete(_cdp_eval(ws, disable_js))
                                 
                                 # Lightweight state probe — detect Stop button (Active) or action buttons (Waiting)
-                                probe_js = "(function(){var btns=document.querySelectorAll('button,[role=button]');var hasStop=false,hasAction=false;for(var i=0;i<btns.length;i++){var t=(btns[i].textContent||'').trim().toLowerCase();var r=btns[i].getBoundingClientRect();if(r.width<1||r.height<1)continue;if(t==='stop'||t==='stop generating'||t==='cancel')hasStop=true;if(t==='accept all'||t==='allow'||t==='run'||t==='approve'||t==='continue'||t==='retry'||t==='trust')hasAction=true;}return hasStop?'A':hasAction?'W':'C';})()"
+                                probe_js = "(function(){var btns=document.querySelectorAll('button,[role=button],[tabindex]');var hasStop=false,hasAction=false;for(var i=0;i<btns.length;i++){var t=(btns[i].textContent||'').trim().toLowerCase();var r=btns[i].getBoundingClientRect();if(r.width<1||r.height<1)continue;if(t==='stop'||t==='stop generating'||t==='cancel')hasStop=true;if(t==='accept all'||t==='accept'||t==='allow'||t==='allow all'||t==='allow in workspace'||t==='allow in this conversation'||t==='allow this conversation'||t==='run'||t==='run command'||t==='run task'||t==='approve'||t==='continue'||t==='proceed'||t==='retry'||t==='try again'||t==='trust'||t==='ok'||t==='okay'||t==='yes'||t==='confirm'||t==='apply'||t==='apply all'||t==='send all')hasAction=true;}return hasStop?'A':hasAction?'W':'C';})()"
                                 res = loop.run_until_complete(_cdp_eval(ws, probe_js))
                                 state = res.get('result', {}).get('result', {}).get('value', 'C') if res else 'C'
                                 if state == 'A': a_count += 1
@@ -1619,19 +1691,29 @@ class VegaClickApp:
                                 except queue.Empty: break
                         self._pages_total = len(pages)
                         self._page_states = (a_count, w_count, c_count)
-            except: pass
+            except Exception as loop_err:
+                debug_log(f"Worker loop exception: {loop_err}")
             time.sleep(POLL_INTERVAL)
 
     def run(self):
+        debug_log("Entering Tk mainloop")
         try:
             self.root.mainloop()
         finally:
+            debug_log("Tk mainloop exited — force killing")
             # Tk mainloop exited (crash or close) — force-kill to stop worker thread
             os._exit(0)
 
 if __name__ == "__main__":
+    debug_log("="*60)
+    debug_log(f"VegaClick {VERSION} starting — PID={os.getpid()} Python={sys.version.split()[0]} Platform={sys.platform}")
+    debug_log(f"Script path: {os.path.abspath(__file__)}")
+    debug_log(f"Log file: {DEBUG_LOG_FILE}")
+    debug_log("="*60)
+
     killed = cleanup_old_processes()
     if killed:
+        debug_log(f"Cleaned up {killed} old process(es)")
         print(f"Cleaned up {killed} old VegaClick process(es)")
 
     import socket
@@ -1639,16 +1721,21 @@ if __name__ == "__main__":
         _vc_lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _vc_lock_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         _vc_lock_socket.bind(('127.0.0.1', 9842))
+        debug_log("Socket lock acquired on 127.0.0.1:9842")
     except socket.error:
+        debug_log("Socket lock FAILED — another instance is running. Exiting.")
         print("VegaClick is already running! Exiting.")
         sys.exit(0)
 
     def __global_exception_handler(exctype, value, tb):
         import traceback
         import os
+        tb_str = ''.join(traceback.format_exception(exctype, value, tb))
+        debug_log(f"FATAL UNHANDLED EXCEPTION:\n{tb_str}")
         log_path = os.path.join(os.environ.get('TEMP', 'c:/tmp'), 'vegaclick_fatal.log')
         with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(''.join(traceback.format_exception(exctype, value, tb)) + "\n")
+            f.write(tb_str + "\n")
     sys.excepthook = __global_exception_handler
 
+    debug_log("Constructing VegaClickApp...")
     VegaClickApp().run()

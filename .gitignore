@@ -18,6 +18,9 @@ __pycache__
 # User settings (generated at runtime)
 settings.json
 
+# Debug logs (generated at runtime)
+debug_logs/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
