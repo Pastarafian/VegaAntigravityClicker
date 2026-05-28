@@ -1775,11 +1775,18 @@ class VegaClickApp:
                                     })()"""
                                     await ws.send(json.dumps({"id": 100, "method": "Runtime.evaluate", "params": {"expression": blue_dot_js, "returnByValue": True}}))
 
+                                agent_state_js = """(function(){
+                                    var loaders = document.querySelectorAll('[aria-label="Loading"], .animate-dot-bounce');
+                                    return loaders.length > 0;
+                                })()"""
+                                await ws.send(json.dumps({"id": 101, "method": "Runtime.evaluate", "params": {"expression": agent_state_js, "returnByValue": True}}))
+
                                 # Get AX Tree
                                 await ws.send(json.dumps({"id": 3, "method": "Accessibility.getFullAXTree"}))
                                 nodes = []
                                 chat_bounds = None
                                 clicked_dot = False
+                                is_agent_loading = False
                                 while True:
                                     try:
                                         resp = await asyncio.wait_for(ws.recv(), timeout=2.0)
@@ -1813,13 +1820,18 @@ class VegaClickApp:
                                             else:
                                                 clicked_dot = res_val
                                             
+                                        if data.get("id") == 101:
+                                            res_val = data.get("result", {}).get("result", {}).get("value")
+                                            if res_val:
+                                                is_agent_loading = True
+
                                         if data.get("id") == 3:
                                             nodes = data.get("result", {}).get("nodes", [])
                                             break
                                     except asyncio.TimeoutError:
                                         break
 
-                                dots = False
+                                dots = is_agent_loading
                                 all_matched = 0
                                 actionable = []
                                 
