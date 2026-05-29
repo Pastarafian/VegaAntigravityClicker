@@ -1783,6 +1783,10 @@ class VegaClickApp:
                                                 if (parent && parent.innerText && parent.innerText.includes('Antigravity')) continue; // Ignore chat header
                                                 if (el.closest('.antigravity-chat-header')) continue;
                                                 
+                                                // Ignore chat history items (previous chats) which may have unread badges
+                                                if (el.closest('[class*="history" i], [aria-label*="history" i], [class*="previous" i], [aria-label*="previous" i]')) continue;
+                                                if (parent && parent.innerText && parent.innerText.match(/\\b\\d+[mdh]\\s*$/)) continue;
+                                                
                                                 var targetEl = el;
                                                 if (parent) targetEl = parent;
                                                 
