@@ -1920,6 +1920,14 @@ class VegaClickApp:
                                     is_ide = ide_flags.get(ws_url, False)
                                     allowed_roles = ["StaticText", "button", "link", "ListMarker", "InlineTextBox", "radio", "option", "menuitem", "menuitemradio", "checkbox", "switch"] if is_ide else ["button", "link", "radio", "option", "menuitem", "menuitemradio", "checkbox", "switch"]
                                     if name and role in allowed_roles:
+                                        is_disabled = False
+                                        for prop in node.get("properties", []):
+                                            if prop.get("name") == "disabled" and prop.get("value", {}).get("value") == True:
+                                                is_disabled = True
+                                                break
+                                        if is_disabled:
+                                            continue
+                                            
                                         name_lower = name.lower().strip()
                                         
                                         if name_lower in ['stop generating']:
