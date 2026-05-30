@@ -591,8 +591,6 @@ class VegaClickApp:
     def _fetch_quota_worker(self):
         import psutil, re, subprocess, ssl
         ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
 
         pid = None
         csrf_token = None
@@ -874,7 +872,7 @@ class VegaClickApp:
 
                 subprocess.run(["taskkill", "/F", "/IM", "Antigravity.exe"], capture_output=True)
                 time.sleep(1.5)
-                subprocess.Popen([exe_path, "--remote-debugging-port=9222"], shell=True)
+                subprocess.Popen([exe_path, "--remote-debugging-port=9222"])
             else:
                 # Linux/macOS: use pgrep/which/readlink to find and restart
                 exe_path = None
@@ -1852,12 +1850,12 @@ class VegaClickApp:
                                                     f.write(res_val["__dump"])
                                             elif isinstance(res_val, dict) and "__clicked" in res_val:
                                                 import os
-                                                with open(os.path.join(os.path.dirname(__file__), "clicked_debug.html"), "w", encoding="utf-8") as f:
+                                                with open(os.path.join(DEBUG_LOG_DIR, "clicked_debug.html"), "w", encoding="utf-8") as f:
                                                     f.write("CLICKED TARGET:\\n" + res_val["__clicked"] + "\\n\\nTHE DOT:\\n" + res_val["__dot"])
                                                 clicked_dot = True
                                             elif isinstance(res_val, str) and (res_val.startswith("ERROR:") or res_val.startswith("DEBUG:")):
                                                 import os
-                                                with open(os.path.join(os.path.dirname(__file__), "clicked_debug.html"), "w", encoding="utf-8") as f:
+                                                with open(os.path.join(DEBUG_LOG_DIR, "clicked_debug.html"), "w", encoding="utf-8") as f:
                                                     f.write(res_val)
                                                 clicked_dot = False
                                             else:
