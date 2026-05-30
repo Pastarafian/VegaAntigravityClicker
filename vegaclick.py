@@ -20,6 +20,24 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timezone
+import ctypes
+
+class LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_uint),
+        ("dwTime", ctypes.c_ulong)
+    ]
+
+def get_os_idle_time():
+    try:
+        lii = LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+        if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+            millis = ctypes.windll.kernel32.GetTickCount() - lii.dwTime
+            return millis / 1000.0
+    except Exception:
+        pass
+    return 999999.0
 
 VERSION = "v16"
 PORT = 9222
@@ -1827,8 +1845,23 @@ class VegaClickApp:
                                     await ws.send(json.dumps({"id": 100, "method": "Runtime.evaluate", "params": {"expression": blue_dot_js, "returnByValue": True}}))
 
                                 agent_state_js = """(function(){
-                                    var loaders = document.querySelectorAll('[aria-label="Loading"], .animate-dot-bounce');
-                                    return loaders.length > 0;
+                                    var selectors = [
+                                        '[aria-label*="loading" i]',
+                                        '[aria-label*="generating" i]',
+                                        '[class*="loader" i]',
+                                        '[class*="spinner" i]',
+                                        '[class*="typing" i]',
+                                        '[class*="skeleton" i]',
+                                        '.animate-dot-bounce',
+                                        'svg animateTransform',
+                                        'svg animate'
+                                    ];
+                                    var loaders = document.querySelectorAll(selectors.join(', '));
+                                    for(var i=0; i<loaders.length; i++) {
+                                        var r = loaders[i].getBoundingClientRect();
+                                        if (r.width > 0 && r.height > 0) return true;
+                                    }
+                                    return false;
                                 })()"""
                                 await ws.send(json.dumps({"id": 101, "method": "Runtime.evaluate", "params": {"expression": agent_state_js, "returnByValue": True}}))
 
@@ -1874,7 +1907,8 @@ class VegaClickApp:
                                         if data.get("id") == 98:
                                             res_val = data.get("result", {}).get("result", {}).get("value")
                                             if res_val:
-                                                t_left = max(0, self.typing_delay - res_val.get('type', 9999999)/1000.0)
+                                                os_idle = get_os_idle_time()
+                                                t_left = max(0, self.typing_delay - min(res_val.get('type', 9999999)/1000.0, os_idle))
                                                 s_left = max(0, self.scroll_delay - res_val.get('scroll', 9999999)/1000.0)
                                                 c_left = max(0, self.tab_delay - res_val.get('click', 9999999)/1000.0)
                                                 user_wait = max(t_left, s_left, c_left)
@@ -1993,7 +2027,7 @@ class VegaClickApp:
                                     if hasattr(self, 'processed_nodes'):
                                         self.processed_nodes.clear()
 
-                                if actionable and getattr(self, 'cooldown', 0) <= 0:
+                                if actionable:
                                     def rank(t):
                                         if t['kw'] == 'submit': return 1
                                         
@@ -2017,6 +2051,14 @@ class VegaClickApp:
                                         return 0
                                     actionable.sort(key=rank, reverse=True)
                                     for target in actionable:
+                                        is_tab_switch = target['kw'] in ['switch project', 'switch workspace', 'needs attention']
+                                        
+                                        if not is_tab_switch and getattr(self, 'cooldown', 0) > 0:
+                                            continue
+                                            
+                                        if is_tab_switch and getattr(self, 'tab_cooldown', 0) > 0:
+                                            continue
+                                            
                                         if hasattr(self, 'processed_nodes'):
                                             if target["id"] in self.processed_nodes and time.time() < self.processed_nodes[target["id"]]:
                                                 continue
