@@ -2197,6 +2197,9 @@ class VegaClickApp:
                                             """
                                             await ws.send(json.dumps({"id": 5, "method": "Runtime.evaluate", "params": {"expression": ripple_js}}))
                                         
+                                        if not is_tab_switch:
+                                            self.cooldown = 0.25
+                                            
                                         break
                                                 
                                     max_cd = self.click_delay
