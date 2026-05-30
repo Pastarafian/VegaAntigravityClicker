@@ -1951,7 +1951,7 @@ class VegaClickApp:
                                                 kw_match = k_kw
                                                 break
                                                 
-                                        if not kw_match and ('submit' in name_lower or 'send' in name_lower):
+                                        if not kw_match and 'submit' in name_lower:
                                             kw_match = 'submit'
                                             
                                         if kw_match and (kw_match == 'submit' or self.enabled.get(kw_match, True)):
