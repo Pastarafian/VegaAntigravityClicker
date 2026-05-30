@@ -590,7 +590,7 @@ class VegaClickApp:
 
     def _fetch_quota_worker(self):
         import psutil, re, subprocess, ssl
-        ctx = ssl.create_default_context()
+        ctx_cache = {}
 
         pid = None
         csrf_token = None
@@ -621,6 +621,16 @@ class VegaClickApp:
                     success = False
                     for port in set(ports):
                         try:
+                            if port not in ctx_cache:
+                                import tempfile, os
+                                cert = ssl.get_server_certificate(('127.0.0.1', port))
+                                with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+                                    f.write(cert)
+                                    cert_file = f.name
+                                ctx_cache[port] = ssl.create_default_context(cafile=cert_file)
+                                os.unlink(cert_file)
+                                
+                            ctx = ctx_cache[port]
                             url = f'https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetUserStatus'
                             req = urllib.request.Request(url, data=b'{"metadata": {}}', headers={
                                 'X-Codeium-Csrf-Token': csrf_token, 'Content-Type': 'application/json'}, method="POST")
