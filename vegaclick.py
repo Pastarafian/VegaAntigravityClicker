@@ -1935,7 +1935,7 @@ class VegaClickApp:
                                                 kw_match = k_kw
                                                 break
                                                 
-                                        if 'submit' in name_lower:
+                                        if not kw_match and ('submit' in name_lower or 'send' in name_lower):
                                             kw_match = 'submit'
                                             
                                         if kw_match and (kw_match == 'submit' or self.enabled.get(kw_match, True)):
@@ -2027,11 +2027,12 @@ class VegaClickApp:
                                         js_click = """function() {
                                             var node = this.nodeType === 3 ? this.parentElement : this;
                                             var isSubagent = ('__KW__' === 'needs attention');
+                                            var isSubmit = ('__KW__' === 'submit');
                                             if (!node.getBoundingClientRect) return {s: "hidden"};
                                             var r = node.getBoundingClientRect();
                                             if (r.width === 0 && r.height === 0) return {s: "hidden"};
                                             if (!isSubagent && node.closest('.left-sidebar, aside, .sidebar, .part.sidebar')) return {s: "sidebar"};
-                                            if (!isSubagent && node.closest('.chat-input, .composer, .input-area, .bottom-bar, [data-testid="composer"], form')) return {s: "composer"};
+                                            if (!isSubagent && !isSubmit && node.closest('.chat-input, .composer, .input-area, .bottom-bar, [data-testid="composer"], form')) return {s: "composer"};
                                             node.scrollIntoView({block: 'center'});
                                             var r2 = node.getBoundingClientRect();
                                             var x = r2.left + r2.width/2;
